@@ -50,6 +50,25 @@ void draw_thing(struct state* state)
     }
 }
 
+void draw_grid(struct state* state)
+{
+    unsigned x, y;
+    for (y = 0; y < state->height; y++) {
+        for (x = 0; x < state->width; x++) {
+            char* line = state->pixels + y * state->stride;
+            char* pixel = line + x * 3;
+            char* red = pixel + 0;
+            char* green = pixel + 1;
+            char* blue = pixel + 2;
+
+            *red = 0;
+            *green = 0;
+            *blue = (x % (state->width / 8) == 0 ||
+                    y % (state->width / 8) == 0) * 128;
+        }
+    }
+}
+
 int run(void)
 {
     SDL_Window   *window = NULL;
@@ -61,6 +80,12 @@ int run(void)
     unsigned      window_height = 256;
     unsigned      old_window_width = 0;
     unsigned      old_window_height = 0;
+    unsigned      active_function = 0;
+
+    void (*functions[])(struct state*) = {
+        draw_thing,
+        draw_grid
+    };
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         /* TODO Log error. */
@@ -111,6 +136,13 @@ int run(void)
                     /* FIXME Handle other window events. */
                     break;
                 }
+            case SDL_KEYDOWN:
+                {
+                    unsigned count = sizeof(functions) / sizeof(functions[0]);
+                    active_function = (active_function + 1) % count;
+                    printf("function %u / %u\n", active_function, count);
+                }
+                break;
             default:
                 /* FIXME Handle other events. */
                 break;
@@ -171,7 +203,7 @@ int run(void)
             state.stride = pitch;
             state.pixels = pixels;
 
-            draw_thing(&state);
+            functions[active_function](&state);
 
             /* Unlock texture, no writes after this. */
             SDL_UnlockTexture(texture);
