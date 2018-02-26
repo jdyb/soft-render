@@ -10,5 +10,5 @@ run: soft-render
 	./soft-render
 
 soft-render: main.c
-	$(CC) -o soft-render main.c -lSDL2
+	$(CC) -o soft-render main.c -lSDL2 -lm
 

@@ -2,6 +2,53 @@
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #include <GL/glew.h>
+#include <assert.h>
+
+struct state {
+    unsigned  width;
+    unsigned  height;
+    char     *pixels;
+    unsigned  stride;
+};
+
+void draw_thing(struct state* state)
+{
+    unsigned  width = state->width;
+    unsigned  height = state->height;
+    char     *pixels = state->pixels;
+    unsigned  stride = state->stride;
+    unsigned x, y;
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+            char* line = pixels + y * stride;
+            char* pixel = line + x * 3;
+            char* red = pixel + 0;
+            char* green = pixel + 1;
+            char* blue = pixel + 2;
+
+            /* Draw background. */
+            *blue = (x % (width / 8) == 0 || y % (width / 8) == 0) * 128;
+
+            unsigned cx = width / 2;
+            unsigned cy = height / 2;
+            int dx = x - cx;
+            int dy = y - cy;
+
+            if (dx < 0) { dx *= -1; }
+            if (dy < 0) { dy *= -1; }
+
+            assert (dx >= 0);
+            assert (dy >= 0);
+
+            /* Draw square. */
+            *green = ((dx < 32) && (dy < 32)) * 128;
+
+            /* Draw circle. */
+            /* FIXME Replace glibc sqrt. */
+            *red = (sqrt(dx*dx + dy*dy) < 64) * 255;
+        }
+    }
+}
 
 int run(void)
 {
@@ -14,7 +61,6 @@ int run(void)
     unsigned      window_height = 256;
     unsigned      old_window_width = 0;
     unsigned      old_window_height = 0;
-
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         /* TODO Log error. */
@@ -102,6 +148,7 @@ int run(void)
         {
             char *pixels = NULL;
             int   pitch = 0;
+            struct state state;
             {
                 /* Lock texture for writing. */
                 int r = SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch);
@@ -109,33 +156,26 @@ int run(void)
                     fprintf(stderr, "SDL_LockTexture: %s\n", SDL_GetError());
                     return 1;
                 }
-            }
-
-            /* Soft-render into pixel array. */
-            {
-                unsigned x, y;
-                for (y = 0; y < window_height; y++) {
-                    for (x = 0; x < window_width; x++) {
-                        char* line = pixels + y * pitch;
-                        char* pixel = line + x * 3;
-                        char* red = pixel + 0;
-                        char* green = pixel + 1;
-                        char* blue = pixel + 2;
-
-                        *red = (x > window_width / 2) * 128;
-                        *blue = x % 64;
-                        *green = y % 64;
-
-
-                    }
+                if (!pixels) {
+                    assert(pixels);
+                    return 1;
+                }
+                if (pitch < 0) {
+                    assert(pitch >= 0);
+                    return 3;
                 }
             }
+
+            state.width = window_width;
+            state.height = window_height;
+            state.stride = pitch;
+            state.pixels = pixels;
+
+            draw_thing(&state);
+
+            /* Unlock texture, no writes after this. */
+            SDL_UnlockTexture(texture);
         }
-
-        /* Unlock texture, no writes after this. */
-        SDL_UnlockTexture(texture);
-
-        /* TODO Render from texture. */
 
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, NULL, NULL);
