@@ -4,14 +4,14 @@
 #include <GL/glew.h>
 #include <assert.h>
 
-struct state {
+struct drawstate {
     unsigned  width;
     unsigned  height;
     char     *pixels;
     unsigned  stride;
 };
 
-void draw_thing(struct state* state)
+void draw_thing(struct drawstate* state)
 {
     unsigned  width = state->width;
     unsigned  height = state->height;
@@ -50,7 +50,7 @@ void draw_thing(struct state* state)
     }
 }
 
-void draw_grid(struct state* state)
+void draw_grid(struct drawstate* state)
 {
     unsigned x, y;
     for (y = 0; y < state->height; y++) {
@@ -69,68 +69,85 @@ void draw_grid(struct state* state)
     }
 }
 
+struct sdlstate {
+    SDL_Window   *window;
+    SDL_Renderer *renderer;
+    SDL_Texture  *texture;
+    unsigned      window_width;
+    unsigned      window_height;
+    unsigned      old_window_width;
+    unsigned      old_window_height;
+};
+
+typedef void (*drawfunction)(struct drawstate*);
+
+const static drawfunction functions[] = {
+    draw_thing,
+    draw_grid
+};
+
+struct controlstate {
+    unsigned  active_function;
+    unsigned  run;
+    SDL_Event event;
+};
+
 int run(void)
 {
-    SDL_Window   *window = NULL;
-    SDL_Event     event;
-    SDL_Renderer *renderer = NULL;
-    SDL_Texture  *texture = NULL;
-    unsigned      run = 1;
-    unsigned      window_width = 256;
-    unsigned      window_height = 256;
-    unsigned      old_window_width = 0;
-    unsigned      old_window_height = 0;
-    unsigned      active_function = 0;
+	struct sdlstate sdlstate;
+	struct controlstate cstate;
 
-    void (*functions[])(struct state*) = {
-        draw_thing,
-        draw_grid
-    };
+	memset(&sdlstate, 0, sizeof(sdlstate));
+	memset(&cstate, 0, sizeof(cstate));
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         /* TODO Log error. */
         return 1;
     }
 
+    cstate.run = 1;
+    sdlstate.window_width = 256;
+    sdlstate.window_height = 256;
+
     /* FIXME Window should not float? */
-    window = SDL_CreateWindow("soft-render",
+    sdlstate.window = SDL_CreateWindow("soft-render",
             SDL_WINDOWPOS_UNDEFINED,
             SDL_WINDOWPOS_UNDEFINED,
-            window_width,
-            window_height,
+            sdlstate.window_width,
+            sdlstate.window_height,
             SDL_WINDOW_RESIZABLE);
 
-    if (!window) {
+    if (!sdlstate.window) {
         /* TODO Log error. */
         return 2;
     }
 
-    renderer = SDL_CreateRenderer(
-            window,
+    sdlstate.renderer = SDL_CreateRenderer(
+            sdlstate.window,
             -1,
             SDL_RENDERER_ACCELERATED);
 
-    if (!renderer) {
+    if (!sdlstate.renderer) {
         /* TODO Log error. */
         return 3;
     }
 
-    while (run) {
+    while (cstate.run) {
 
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
+        while (SDL_PollEvent(&cstate.event)) {
+            switch (cstate.event.type) {
             case SDL_QUIT:
-                run = 0;
+                cstate.run = 0;
                 break;
             case SDL_WINDOWEVENT:
-                switch (event.window.event) {
+                switch (cstate.event.window.event) {
                 case SDL_WINDOWEVENT_CLOSE:
-                    run = 0;
+                    cstate.run = 0;
                     break;
                 case SDL_WINDOWEVENT_RESIZED:
                     /* Signals resize, different from old_window_* */
-                    window_width = event.window.data1;
-                    window_height = event.window.data2;
+                    sdlstate.window_width = cstate.event.window.data1;
+                    sdlstate.window_height = cstate.event.window.data2;
                     break;
                 default:
                     /* FIXME Handle other window events. */
@@ -139,8 +156,8 @@ int run(void)
             case SDL_KEYDOWN:
                 {
                     unsigned count = sizeof(functions) / sizeof(functions[0]);
-                    active_function = (active_function + 1) % count;
-                    printf("function %u / %u\n", active_function, count);
+                    cstate.active_function = (cstate.active_function + 1) % count;
+                    printf("function %u / %u\n", cstate.active_function, count);
                 }
                 break;
             default:
@@ -150,40 +167,40 @@ int run(void)
         }
 
         /* Reallocate pixel data and texture on resize. */
-        if (window_width != old_window_width ||
-                window_height != old_window_height) {
+        if (sdlstate.window_width != sdlstate.old_window_width ||
+                sdlstate.window_height != sdlstate.old_window_height) {
 
-            printf("resize %ux%u\n", window_width, window_height);
+            printf("resize %ux%u\n", sdlstate.window_width, sdlstate.window_height);
 
-            if (texture) {
-                SDL_DestroyTexture(texture); /* FIXME Check for error. */
-                texture = NULL;
+            if (sdlstate.texture) {
+                SDL_DestroyTexture(sdlstate.texture); /* FIXME Check for error. */
+                sdlstate.texture = NULL;
             }
 
-            texture = SDL_CreateTexture(
-                    renderer,
+            sdlstate.texture = SDL_CreateTexture(
+                    sdlstate.renderer,
                     SDL_PIXELFORMAT_RGB24,
                     SDL_TEXTUREACCESS_STREAMING,
-                    window_width,
-                    window_height);
+                    sdlstate.window_width,
+                    sdlstate.window_height);
 
-            if (!texture) {
+            if (!sdlstate.texture) {
                 /* FIXME report error. */
                 return 3;
             }
 
-            old_window_width = window_width;
-            old_window_height = window_height;
+            sdlstate.old_window_width = sdlstate.window_width;
+            sdlstate.old_window_height = sdlstate.window_height;
 
         }
 
         {
             char *pixels = NULL;
             int   pitch = 0;
-            struct state state;
+            struct drawstate state;
             {
                 /* Lock texture for writing. */
-                int r = SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch);
+                int r = SDL_LockTexture(sdlstate.texture, NULL, (void**)&pixels, &pitch);
                 if (r) {
                     fprintf(stderr, "SDL_LockTexture: %s\n", SDL_GetError());
                     return 1;
@@ -198,29 +215,29 @@ int run(void)
                 }
             }
 
-            state.width = window_width;
-            state.height = window_height;
+            state.width = sdlstate.window_width;
+            state.height = sdlstate.window_height;
             state.stride = pitch;
             state.pixels = pixels;
 
-            functions[active_function](&state);
+            functions[cstate.active_function](&state);
 
             /* Unlock texture, no writes after this. */
-            SDL_UnlockTexture(texture);
+            SDL_UnlockTexture(sdlstate.texture);
         }
 
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, texture, NULL, NULL);
-        SDL_RenderPresent(renderer);
+        SDL_RenderClear(sdlstate.renderer);
+        SDL_RenderCopy(sdlstate.renderer, sdlstate.texture, NULL, NULL);
+        SDL_RenderPresent(sdlstate.renderer);
 
-        SDL_GL_SwapWindow(window);
+        SDL_GL_SwapWindow(sdlstate.window);
         SDL_Delay(100);
     }
 
     /* Cleanup before main return. */
-    SDL_DestroyTexture(texture);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+    SDL_DestroyTexture(sdlstate.texture);
+    SDL_DestroyRenderer(sdlstate.renderer);
+    SDL_DestroyWindow(sdlstate.window);
     SDL_Quit();
 
     return 0;
