@@ -16,6 +16,11 @@ make run
 make clean
 ```
 
+Useful links
+------------
+
+* http://www.gabrielgambetta.com/computer-graphics-from-scratch/introduction.html
+
 License
 -------
 
