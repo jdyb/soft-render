@@ -30,14 +30,6 @@ float dot(struct v3 a, struct v3 b)
 		+ (a.z * b.z);
 }
 
-float len(struct v3 v)
-{
-	float x = v.x * v.x,
-	      y = v.y * v.y,
-	      z = v.z * v.z;
-	return sqrt(x + y + z);
-}
-
 struct v3 sub(struct v3 a, struct v3 b)
 {
 	struct v3 c;
@@ -76,6 +68,86 @@ struct canvas_pixel {
 struct f2 {
 	float f[2];
 };
+
+enum profname {
+	PROFNAME_LOOP,
+	PROFNAME_TEXT,
+	PROFNAME_DRAW,
+	PROFNAME_PIXEL,
+	PROFNAME_LAST
+};
+
+struct profblock {
+	unsigned count_last_frame;
+	unsigned count_current_frame;
+	unsigned count_total;
+	float    clock_last_frame;
+	float    clock_current_frame;
+	float    clock_total;
+	unsigned active;
+	clock_t  current_clock_start;
+	clock_t  current_clock_end;
+};
+
+char* profstr[PROFNAME_LAST] = {
+	"loop",
+	"text",
+	"draw",
+	"pixel"
+};
+
+struct profblock profblocks[PROFNAME_LAST];
+
+void prof_start(enum profname name)
+{
+	struct profblock *pb = profblocks + name;
+	assert(!pb->active);
+
+	pb->active = 1;
+	pb->count_current_frame++;
+	pb->count_total++;
+
+	pb->current_clock_start = clock();
+}
+
+void prof_end(enum profname name)
+{
+	struct profblock *pb = profblocks + name;
+	assert(pb->active);
+
+	pb->active = 0;
+	pb->current_clock_end = clock();
+
+	clock_t clock_delta = pb->current_clock_end - pb->current_clock_start;
+	float delta_seconds = ((float)clock_delta) / CLOCKS_PER_SEC;
+
+	pb->clock_current_frame += delta_seconds;
+	pb->clock_total += delta_seconds;
+}
+
+void prof_frame_reset(void)
+{
+	for (int i = 0; i < PROFNAME_LAST; i++) {
+		struct profblock *pb = profblocks + i;
+		assert(!pb->active);
+		pb->clock_last_frame = pb->clock_current_frame;
+		pb->count_last_frame = pb->count_current_frame;
+		pb->clock_current_frame = 0;
+		pb->count_current_frame = 0;
+	}
+}
+
+void prof_clear(enum profname name)
+{
+	struct profblock *pb = profblocks + name;
+	pb->active = 0;
+	pb->clock_current_frame = 0;
+	pb->clock_last_frame = 0;
+	pb->clock_total = 0;
+	pb->count_current_frame = 0;
+	pb->clock_last_frame = 0;
+	pb->count_total = 0;
+}
 
 /* Intersection calculation between a ray and a sphere. */
 struct f2 intersec_ray_sphere(struct ray ray, struct sphere sphere)
@@ -196,7 +268,7 @@ void set_canvas_pixel(
 }
 
 /* Draw a 'sphere' using a simplistic raytracer. */
-void draw_sphere(struct drawstate *state)
+void draw(struct drawstate *state)
 {
 	unsigned  width = state->width;
 	unsigned  height = state->height;
@@ -204,6 +276,7 @@ void draw_sphere(struct drawstate *state)
 	struct canvas_pixel p;
 	p.w = state->width;
 	p.h = state->height;
+	prof_start(PROFNAME_DRAW);
 	/* FIXME lift these loops and select a per-pixel function instead
 	 * of loop function in functions table. */
 	for (y = 0; y < height; y++) {
@@ -214,7 +287,21 @@ void draw_sphere(struct drawstate *state)
 			set_canvas_pixel(state, p.c, x, y);
 		}
 	}
+	prof_end(PROFNAME_DRAW);
+
+	unsigned pixel_count = height * width;
+	profblocks[PROFNAME_PIXEL].count_current_frame = pixel_count;
+	profblocks[PROFNAME_PIXEL].count_last_frame = pixel_count;
+	profblocks[PROFNAME_PIXEL].count_total += pixel_count;
+	profblocks[PROFNAME_PIXEL].clock_current_frame =
+		profblocks[PROFNAME_DRAW].clock_current_frame / pixel_count;
+	profblocks[PROFNAME_PIXEL].clock_current_frame =
+		profblocks[PROFNAME_DRAW].clock_last_frame / pixel_count;
+	profblocks[PROFNAME_PIXEL].clock_total +=
+		profblocks[PROFNAME_PIXEL].clock_current_frame;
+
 }
+
 
 struct sdlstate {
     SDL_Window   *window;
@@ -231,84 +318,6 @@ struct sdlstate {
     unsigned      old_window_width;
     unsigned      old_window_height;
 };
-
-enum profname {
-	PROFNAME_LOOP,
-	PROFNAME_TEXT,
-	PROFNAME_FUNC,
-	PROFNAME_LAST
-};
-
-struct profblock {
-	unsigned count_last_frame;
-	unsigned count_current_frame;
-	unsigned count_total;
-	float    clock_last_frame;
-	float    clock_current_frame;
-	float    clock_total;
-	unsigned active;
-	clock_t  current_clock_start;
-	clock_t  current_clock_end;
-};
-
-char* profstr[PROFNAME_LAST] = {
-	"loop",
-	"text",
-	"func",
-};
-
-struct profblock profblocks[PROFNAME_LAST];
-
-void prof_start(enum profname name)
-{
-	struct profblock *pb = profblocks + name;
-	assert(!pb->active);
-
-	pb->active = 1;
-	pb->count_current_frame++;
-	pb->count_total++;
-
-	pb->current_clock_start = clock();
-}
-
-void prof_end(enum profname name)
-{
-	struct profblock *pb = profblocks + name;
-	assert(pb->active);
-
-	pb->active = 0;
-	pb->current_clock_end = clock();
-
-	clock_t clock_delta = pb->current_clock_end - pb->current_clock_start;
-	float delta_seconds = ((float)clock_delta) / CLOCKS_PER_SEC;
-
-	pb->clock_current_frame += delta_seconds;
-	pb->clock_total += delta_seconds;
-}
-
-void prof_frame_reset(void)
-{
-	for (int i = 0; i < PROFNAME_LAST; i++) {
-		struct profblock *pb = profblocks + i;
-		assert(!pb->active);
-		pb->clock_last_frame = pb->clock_current_frame;
-		pb->count_last_frame = pb->count_last_frame;
-		pb->clock_current_frame = 0;
-		pb->count_current_frame = 0;
-	}
-}
-
-void prof_clear(enum profname name)
-{
-	struct profblock *pb = profblocks + name;
-	pb->active = 0;
-	pb->clock_current_frame = 0;
-	pb->clock_last_frame = 0;
-	pb->clock_total = 0;
-	pb->count_current_frame = 0;
-	pb->clock_last_frame = 0;
-	pb->count_total = 0;
-}
 
 struct controlstate {
     unsigned  active_function;
@@ -337,7 +346,7 @@ int run(void)
 	    return 2;
     }
 
-    sdlstate.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMonoOblique.ttf", 19);
+    sdlstate.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMonoOblique.ttf", 12);
     if (!sdlstate.font) {
 	    fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
 	    return 3;
@@ -465,11 +474,8 @@ int run(void)
             state.stride = pitch;
             state.pixels = pixels;
 
-	    prof_start(PROFNAME_FUNC);
+	    draw(&state);
 
-	    draw_sphere(&state);
-
-	    prof_end(PROFNAME_FUNC);
 
 		if (cstate.mouse_active) {
 			unsigned char* line = (unsigned char*)pixels + cstate.mouse_y * pitch;
@@ -497,9 +503,10 @@ int run(void)
 	sdlstate.line_count = 0;
 	for (int i = 0; i < PROFNAME_LAST && i < 20; i++) {
 		struct profblock *pb = profblocks + i;
-		sprintf(sdlstate.text_lines[i], "%3x %8s %4u %0.3f HZ (%0.3f)",
+		sprintf(sdlstate.text_lines[i], "%3x %8s %12u %12u %9.1f HZ (%0.5f)",
 				i,
 				profstr[i],
+				pb->count_last_frame,
 				pb->count_total,
 				1 / pb->clock_last_frame,
 				pb->clock_last_frame);
