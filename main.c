@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <GL/glew.h>
 #include <assert.h>
 
@@ -276,6 +277,11 @@ struct sdlstate {
     SDL_Window   *window;
     SDL_Renderer *renderer;
     SDL_Texture  *texture;
+    TTF_Font     *font;
+    SDL_Surface  *text_surface;
+    SDL_Texture  *text_texture;
+    SDL_Rect      text_rect;
+    char          text_buffer[512];
     unsigned      window_width;
     unsigned      window_height;
     unsigned      old_window_width;
@@ -306,9 +312,23 @@ int run(void)
 	memset(&sdlstate, 0, sizeof(sdlstate));
 	memset(&cstate, 0, sizeof(cstate));
 
+	strncpy(sdlstate.text_buffer, "Hello World", sizeof(sdlstate.text_buffer) - 1);
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         /* TODO Log error. */
         return 1;
+    }
+
+    /* FIXME Replace SDL_ttf with our own code. */
+    if (TTF_Init() == -1) {
+	    fprintf(stderr, "TTF_Init: %s\n", TTF_GetError());
+	    return 2;
+    }
+
+    sdlstate.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMonoOblique.ttf", 19);
+    if (!sdlstate.font) {
+	    fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
+	    return 3;
     }
 
     cstate.run = 1;
@@ -458,8 +478,57 @@ int run(void)
 
         }
 
+	{
+		SDL_Color bg = {0, 0, 0, 0};
+		SDL_Color fg = {255, 255, 255, 255};
+
+		if (sdlstate.text_texture) {
+			SDL_DestroyTexture(sdlstate.text_texture);
+			sdlstate.text_texture = NULL;
+		}
+
+		if (sdlstate.text_surface) {
+			SDL_FreeSurface(sdlstate.text_surface);
+			sdlstate.text_surface = NULL;
+		}
+
+		sdlstate.text_surface = TTF_RenderText(
+				sdlstate.font,
+				sdlstate.text_buffer,
+				fg,
+				bg);
+
+		if (!sdlstate.text_surface) {
+			fprintf(stderr, "TTF_RenderText: %s\n", TTF_GetError());
+			return 1;
+		}
+
+		sdlstate.text_texture =
+			SDL_CreateTextureFromSurface(
+					sdlstate.renderer,
+					sdlstate.text_surface);
+
+		if (!sdlstate.text_texture) {
+			fprintf(stderr, "SDL_CreateTextureFromSurface: %s\n",
+					SDL_GetError());
+			return 1;
+		}
+
+		sdlstate.text_rect.h = sdlstate.text_surface->h;
+		sdlstate.text_rect.w = sdlstate.text_surface->w;
+
+		sdlstate.text_rect.x = 5;
+		sdlstate.text_rect.y = sdlstate.window_height
+			- sdlstate.text_surface->h - 5;
+
+	}
+
         SDL_RenderClear(sdlstate.renderer);
+
         SDL_RenderCopy(sdlstate.renderer, sdlstate.texture, NULL, NULL);
+
+	SDL_RenderCopy(sdlstate.renderer, sdlstate.text_texture, NULL, &(sdlstate.text_rect));
+
         SDL_RenderPresent(sdlstate.renderer);
 
         SDL_GL_SwapWindow(sdlstate.window);
@@ -467,9 +536,11 @@ int run(void)
     }
 
     /* Cleanup before main return. */
+    TTF_CloseFont(sdlstate.font);
     SDL_DestroyTexture(sdlstate.texture);
     SDL_DestroyRenderer(sdlstate.renderer);
     SDL_DestroyWindow(sdlstate.window);
+    TTF_Quit();
     SDL_Quit();
 
     return 0;
