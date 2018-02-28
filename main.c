@@ -6,6 +6,8 @@
 #include <time.h>
 #include <assert.h>
 
+#include "prof.h"
+
 struct drawstate {
     unsigned  width;
     unsigned  height;
@@ -69,34 +71,8 @@ struct f2 {
 	float f[2];
 };
 
-enum profname {
-	PROFNAME_LOOP,
-	PROFNAME_TEXT,
-	PROFNAME_DRAW,
-	PROFNAME_PIXEL,
-	PROFNAME_LAST
-};
-
-struct profblock {
-	unsigned count_last_frame;
-	unsigned count_current_frame;
-	unsigned count_total;
-	float    clock_last_frame;
-	float    clock_current_frame;
-	float    clock_total;
-	unsigned active;
-	clock_t  current_clock_start;
-	clock_t  current_clock_end;
-};
-
-char* profstr[PROFNAME_LAST] = {
-	"loop",
-	"text",
-	"draw",
-	"pixel"
-};
-
 struct profblock profblocks[PROFNAME_LAST];
+FILE            *prof_file;
 
 void prof_start(enum profname name)
 {
@@ -335,6 +311,13 @@ int run(void)
 	memset(&sdlstate, 0, sizeof(sdlstate));
 	memset(&cstate, 0, sizeof(cstate));
 
+	prof_file = fopen("prof", "w");
+	if (!prof_file) {
+		fputs("Could not open profile file.\n", stderr);
+		perror("fopen");
+		return 1;
+	}
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         /* TODO Log error. */
         return 1;
@@ -498,8 +481,6 @@ int run(void)
 
         SDL_RenderCopy(sdlstate.renderer, sdlstate.texture, NULL, NULL);
 
-	prof_start(PROFNAME_TEXT);
-
 	sdlstate.line_count = 0;
 	for (int i = 0; i < PROFNAME_LAST && i < 20; i++) {
 		struct profblock *pb = profblocks + i;
@@ -563,8 +544,6 @@ int run(void)
 		SDL_RenderCopy(sdlstate.renderer, sdlstate.text_texture, NULL, &(sdlstate.text_rect));
 	}
 
-	prof_end(PROFNAME_TEXT);
-
         SDL_RenderPresent(sdlstate.renderer);
 
         SDL_GL_SwapWindow(sdlstate.window);
@@ -574,6 +553,10 @@ int run(void)
 	prof_frame_reset();
     }
 
+    /* FIXME Usa a proper file format for profile data. */
+    fwrite(profblocks, sizeof(profblocks[0]), PROFNAME_LAST, prof_file);
+
+
     /* Cleanup before main return. */
     TTF_CloseFont(sdlstate.font);
     SDL_DestroyTexture(sdlstate.texture);
@@ -581,6 +564,7 @@ int run(void)
     SDL_DestroyWindow(sdlstate.window);
     TTF_Quit();
     SDL_Quit();
+    fclose(prof_file);
 
     return 0;
 }
