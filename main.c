@@ -216,64 +216,6 @@ void draw_sphere(struct drawstate *state)
 	}
 }
 
-void draw_thing(struct drawstate* state)
-{
-    unsigned  width = state->width;
-    unsigned  height = state->height;
-    unsigned char     *pixels = state->pixels;
-    unsigned  stride = state->stride;
-    unsigned x, y;
-    for (y = 0; y < height; y++) {
-        for (x = 0; x < width; x++) {
-            unsigned char* line = pixels + y * stride;
-            unsigned char* pixel = line + x * 3;
-            unsigned char* red = pixel + 0;
-            unsigned char* green = pixel + 1;
-            unsigned char* blue = pixel + 2;
-
-            /* Draw background. */
-            *blue = (x % (width / 8) == 0 || y % (width / 8) == 0) * 128;
-
-            unsigned cx = width / 2;
-            unsigned cy = height / 2;
-            int dx = x - cx;
-            int dy = y - cy;
-
-            if (dx < 0) { dx *= -1; }
-            if (dy < 0) { dy *= -1; }
-
-            assert (dx >= 0);
-            assert (dy >= 0);
-
-            /* Draw square. */
-            *green = ((dx < 32) && (dy < 32)) * 128;
-
-            /* Draw circle. */
-            /* FIXME Replace glibc sqrt. */
-            *red = (sqrt(dx*dx + dy*dy) < 64) * 255;
-        }
-    }
-}
-
-void draw_grid(struct drawstate* state)
-{
-    unsigned x, y;
-    for (y = 0; y < state->height; y++) {
-        for (x = 0; x < state->width; x++) {
-            unsigned char* line = state->pixels + y * state->stride;
-            unsigned char* pixel = line + x * 3;
-            unsigned char* red = pixel + 0;
-            unsigned char* green = pixel + 1;
-            unsigned char* blue = pixel + 2;
-
-            *red = 0;
-            *green = 0;
-            *blue = (x % (state->width / 8) == 0 ||
-                    y % (state->width / 8) == 0) * 128;
-        }
-    }
-}
-
 struct sdlstate {
     SDL_Window   *window;
     SDL_Renderer *renderer;
@@ -288,14 +230,6 @@ struct sdlstate {
     unsigned      window_height;
     unsigned      old_window_width;
     unsigned      old_window_height;
-};
-
-typedef void (*drawfunction)(struct drawstate*);
-
-const static drawfunction functions[] = {
-    draw_thing,
-    draw_grid,
-    draw_sphere
 };
 
 enum profname {
@@ -461,13 +395,6 @@ int run(void)
                     break;
                 }
 		break;
-            case SDL_KEYDOWN:
-                {
-                    unsigned count = sizeof(functions) / sizeof(functions[0]);
-                    cstate.active_function = (cstate.active_function + 1) % count;
-                    printf("function %u / %u\n", cstate.active_function, count);
-                }
-                break;
 	    case SDL_MOUSEMOTION:
 		{
 			cstate.mouse_x = cstate.event.motion.x;
@@ -540,7 +467,7 @@ int run(void)
 
 	    prof_start(PROFNAME_FUNC);
 
-            functions[cstate.active_function](&state);
+	    draw_sphere(&state);
 
 	    prof_end(PROFNAME_FUNC);
 
