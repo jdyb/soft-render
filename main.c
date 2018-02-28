@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <GL/glew.h>
+#include <time.h>
 #include <assert.h>
 
 struct drawstate {
@@ -281,7 +282,8 @@ struct sdlstate {
     SDL_Surface  *text_surface;
     SDL_Texture  *text_texture;
     SDL_Rect      text_rect;
-    char          text_buffer[512];
+    char          text_lines[64][512];
+    unsigned      line_count;
     unsigned      window_width;
     unsigned      window_height;
     unsigned      old_window_width;
@@ -295,6 +297,84 @@ const static drawfunction functions[] = {
     draw_grid,
     draw_sphere
 };
+
+enum profname {
+	PROFNAME_LOOP,
+	PROFNAME_TEXT,
+	PROFNAME_FUNC,
+	PROFNAME_LAST
+};
+
+struct profblock {
+	unsigned count_last_frame;
+	unsigned count_current_frame;
+	unsigned count_total;
+	float    clock_last_frame;
+	float    clock_current_frame;
+	float    clock_total;
+	unsigned active;
+	clock_t  current_clock_start;
+	clock_t  current_clock_end;
+};
+
+char* profstr[PROFNAME_LAST] = {
+	"loop",
+	"text",
+	"func",
+};
+
+struct profblock profblocks[PROFNAME_LAST];
+
+void prof_start(enum profname name)
+{
+	struct profblock *pb = profblocks + name;
+	assert(!pb->active);
+
+	pb->active = 1;
+	pb->count_current_frame++;
+	pb->count_total++;
+
+	pb->current_clock_start = clock();
+}
+
+void prof_end(enum profname name)
+{
+	struct profblock *pb = profblocks + name;
+	assert(pb->active);
+
+	pb->active = 0;
+	pb->current_clock_end = clock();
+
+	clock_t clock_delta = pb->current_clock_end - pb->current_clock_start;
+	float delta_seconds = ((float)clock_delta) / CLOCKS_PER_SEC;
+
+	pb->clock_current_frame += delta_seconds;
+	pb->clock_total += delta_seconds;
+}
+
+void prof_frame_reset(void)
+{
+	for (int i = 0; i < PROFNAME_LAST; i++) {
+		struct profblock *pb = profblocks + i;
+		assert(!pb->active);
+		pb->clock_last_frame = pb->clock_current_frame;
+		pb->count_last_frame = pb->count_last_frame;
+		pb->clock_current_frame = 0;
+		pb->count_current_frame = 0;
+	}
+}
+
+void prof_clear(enum profname name)
+{
+	struct profblock *pb = profblocks + name;
+	pb->active = 0;
+	pb->clock_current_frame = 0;
+	pb->clock_last_frame = 0;
+	pb->clock_total = 0;
+	pb->count_current_frame = 0;
+	pb->clock_last_frame = 0;
+	pb->count_total = 0;
+}
 
 struct controlstate {
     unsigned  active_function;
@@ -311,8 +391,6 @@ int run(void)
 
 	memset(&sdlstate, 0, sizeof(sdlstate));
 	memset(&cstate, 0, sizeof(cstate));
-
-	strncpy(sdlstate.text_buffer, "Hello World", sizeof(sdlstate.text_buffer) - 1);
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         /* TODO Log error. */
@@ -359,6 +437,7 @@ int run(void)
     }
 
     while (cstate.run) {
+	    prof_start(PROFNAME_LOOP);
 
 	    cstate.mouse_active = 0;
 
@@ -459,7 +538,11 @@ int run(void)
             state.stride = pitch;
             state.pixels = pixels;
 
+	    prof_start(PROFNAME_FUNC);
+
             functions[cstate.active_function](&state);
+
+	    prof_end(PROFNAME_FUNC);
 
 		if (cstate.mouse_active) {
 			unsigned char* line = (unsigned char*)pixels + cstate.mouse_y * pitch;
@@ -478,9 +561,31 @@ int run(void)
 
         }
 
-	{
+        SDL_RenderClear(sdlstate.renderer);
+
+        SDL_RenderCopy(sdlstate.renderer, sdlstate.texture, NULL, NULL);
+
+	prof_start(PROFNAME_TEXT);
+
+	sdlstate.line_count = 0;
+	for (int i = 0; i < PROFNAME_LAST && i < 20; i++) {
+		struct profblock *pb = profblocks + i;
+		sprintf(sdlstate.text_lines[i], "%3x %8s %4u %0.3f HZ (%0.3f)",
+				i,
+				profstr[i],
+				pb->count_total,
+				1 / pb->clock_last_frame,
+				pb->clock_last_frame);
+		sdlstate.line_count++;
+	}
+
+
+	for (unsigned i = 0; i < sdlstate.line_count; i++) {
 		SDL_Color bg = {0, 0, 0, 0};
 		SDL_Color fg = {255, 255, 255, 255};
+
+		if (strlen(sdlstate.text_lines[i]) == 0)
+			continue;
 
 		if (sdlstate.text_texture) {
 			SDL_DestroyTexture(sdlstate.text_texture);
@@ -494,7 +599,7 @@ int run(void)
 
 		sdlstate.text_surface = TTF_RenderText(
 				sdlstate.font,
-				sdlstate.text_buffer,
+				sdlstate.text_lines[i],
 				fg,
 				bg);
 
@@ -519,20 +624,20 @@ int run(void)
 
 		sdlstate.text_rect.x = 5;
 		sdlstate.text_rect.y = sdlstate.window_height
-			- sdlstate.text_surface->h - 5;
+			- sdlstate.text_surface->h * (i + 1) - 5;
 
+		SDL_RenderCopy(sdlstate.renderer, sdlstate.text_texture, NULL, &(sdlstate.text_rect));
 	}
 
-        SDL_RenderClear(sdlstate.renderer);
-
-        SDL_RenderCopy(sdlstate.renderer, sdlstate.texture, NULL, NULL);
-
-	SDL_RenderCopy(sdlstate.renderer, sdlstate.text_texture, NULL, &(sdlstate.text_rect));
+	prof_end(PROFNAME_TEXT);
 
         SDL_RenderPresent(sdlstate.renderer);
 
         SDL_GL_SwapWindow(sdlstate.window);
-        SDL_Delay(100);
+
+	prof_end(PROFNAME_LOOP);
+
+	prof_frame_reset();
     }
 
     /* Cleanup before main return. */
